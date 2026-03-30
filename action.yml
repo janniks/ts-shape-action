@@ -1,0 +1,209 @@
+name: "TypeScript Public API Surface"
+description: "Analyze and diff public API surface of TypeScript packages in npm workspaces, with PR comments"
+author: "ts-shape-action"
+
+branding:
+  icon: "package"
+  color: "blue"
+
+inputs:
+  github-token:
+    description: "GitHub token for posting PR comments"
+    required: true
+    default: ${{ github.token }}
+  root:
+    description: "Root directory of the workspace to analyze"
+    required: false
+    default: "."
+  packages:
+    description: 'Glob pattern to filter packages (e.g., "@acme/*")'
+    required: false
+  fail-on-changes:
+    description: "Fail the action if API changes are detected"
+    required: false
+    default: "false"
+  comment-on-no-changes:
+    description: "Post a comment even when no changes are detected"
+    required: false
+    default: "false"
+
+outputs:
+  has-changes:
+    description: "Whether API changes were detected"
+    value: ${{ steps.diff.outputs.has-changes }}
+  packages-affected:
+    description: "Number of packages with changes"
+    value: ${{ steps.diff.outputs.packages-affected }}
+  exports-added:
+    description: "Number of exports added"
+    value: ${{ steps.diff.outputs.exports-added }}
+  exports-removed:
+    description: "Number of exports removed"
+    value: ${{ steps.diff.outputs.exports-removed }}
+  exports-changed:
+    description: "Number of exports changed"
+    value: ${{ steps.diff.outputs.exports-changed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "24"
+
+    - name: Install action dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm ci --ignore-scripts
+
+    - name: Build action
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: npm run build
+
+    - name: Get base and head SHAs
+      id: refs
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          echo "base-sha=${{ github.event.pull_request.base.sha }}" >> $GITHUB_OUTPUT
+          echo "head-sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+        else
+          echo "base-sha=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          echo "head-sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Analyze base
+      shell: bash
+      run: |
+        git checkout ${{ steps.refs.outputs.base-sha }} --quiet
+        npm ci --ignore-scripts 2>/dev/null || true
+        node ${{ github.action_path }}/dist/index.js \
+          --root "${{ inputs.root }}" \
+          --output "${{ runner.temp }}/base-api" \
+          ${{ inputs.packages && format('--packages "{0}"', inputs.packages) || '' }} || true
+
+    - name: Analyze head
+      shell: bash
+      run: |
+        git checkout ${{ steps.refs.outputs.head-sha }} --quiet
+        npm ci --ignore-scripts 2>/dev/null || true
+        node ${{ github.action_path }}/dist/index.js \
+          --root "${{ inputs.root }}" \
+          --output "${{ runner.temp }}/head-api" \
+          ${{ inputs.packages && format('--packages "{0}"', inputs.packages) || '' }}
+
+    - name: Compute diff
+      id: diff
+      shell: bash
+      run: |
+        set +e
+
+        # Handle case where base doesn't exist (new repo or first PR)
+        if [ ! -f "${{ runner.temp }}/base-api/public-api.jsonl" ]; then
+          echo "No base API found, treating all exports as new"
+          mkdir -p "${{ runner.temp }}/base-api"
+          touch "${{ runner.temp }}/base-api/public-api.jsonl"
+        fi
+
+        node ${{ github.action_path }}/dist/diff-cli.js \
+          "${{ runner.temp }}/base-api" \
+          "${{ runner.temp }}/head-api" \
+          --output "${{ runner.temp }}/diff"
+        EXIT_CODE=$?
+
+        if [ $EXIT_CODE -eq 2 ]; then
+          echo "has-changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "has-changes=false" >> $GITHUB_OUTPUT
+        fi
+
+        if [ -f "${{ runner.temp }}/diff/diff.json" ]; then
+          PACKAGES=$(jq -r '.summary.packagesAffected' "${{ runner.temp }}/diff/diff.json")
+          ADDED=$(jq -r '.summary.totalAdded' "${{ runner.temp }}/diff/diff.json")
+          REMOVED=$(jq -r '.summary.totalRemoved' "${{ runner.temp }}/diff/diff.json")
+          CHANGED=$(jq -r '.summary.totalChanged' "${{ runner.temp }}/diff/diff.json")
+
+          echo "packages-affected=$PACKAGES" >> $GITHUB_OUTPUT
+          echo "exports-added=$ADDED" >> $GITHUB_OUTPUT
+          echo "exports-removed=$REMOVED" >> $GITHUB_OUTPUT
+          echo "exports-changed=$CHANGED" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Post PR comment
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+
+          const hasChanges = '${{ steps.diff.outputs.has-changes }}' === 'true';
+          const commentOnNoChanges = '${{ inputs.comment-on-no-changes }}' === 'true';
+
+          // Skip if no changes and not configured to comment
+          if (!hasChanges && !commentOnNoChanges) {
+            console.log('No API changes detected, skipping comment');
+            return;
+          }
+
+          const diffPath = path.join('${{ runner.temp }}', 'diff', 'diff.md');
+          let body;
+
+          if (fs.existsSync(diffPath)) {
+            body = fs.readFileSync(diffPath, 'utf8');
+          } else {
+            body = '## Public API Surface Changes\n\nNo changes detected.';
+          }
+
+          // Find existing comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+
+          const marker = '<!-- ts-shape-action -->';
+          const botComment = comments.find(comment =>
+            comment.body && comment.body.includes(marker)
+          );
+
+          const fullBody = `${marker}\n${body}`;
+
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: fullBody
+            });
+            console.log('Updated existing comment');
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: fullBody
+            });
+            console.log('Created new comment');
+          }
+
+    - name: Upload artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: public-api-surface
+        path: |
+          ${{ runner.temp }}/base-api/
+          ${{ runner.temp }}/head-api/
+          ${{ runner.temp }}/diff/
+        retention-days: 7
+
+    - name: Check for failures
+      if: inputs.fail-on-changes == 'true' && steps.diff.outputs.has-changes == 'true'
+      shell: bash
+      run: |
+        echo "::error::Public API changes detected. Review the changes in the PR comment."
+        exit 1

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output artifacts
+public-api-output/
+base-api/
+head-api/
+*.jsonl
+
+# Test output
+.test-output/
+
+# Logs
+*.log
+npm-debug.log*
