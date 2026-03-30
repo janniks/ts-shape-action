@@ -3,7 +3,7 @@
  */
 
 import type { DiffResult, ChangedExport, PackageDiff } from "./diff.js";
-import { groupByPackage, hasChanges } from "./diff.js";
+import { groupByPackage, hasChanges, recommendedSemver } from "./diff.js";
 import type { ExportFact } from "./analyzer.js";
 
 /**
@@ -269,6 +269,7 @@ export function generateActionOutputs(
     "exports-added": String(diff.summary.totalAdded),
     "exports-removed": String(diff.summary.totalRemoved),
     "exports-changed": String(diff.summary.totalChanged),
+    semver: recommendedSemver(diff),
     summary: formatSummaryLine(diff),
   };
 }

@@ -212,6 +212,20 @@ export function hasChanges(diff: DiffResult): boolean {
 }
 
 /**
+ * Determine recommended semver bump from a diff.
+ *  - removed or changed exports → "major"
+ *  - only added exports         → "minor"
+ *  - no changes                 → "patch"
+ */
+export function recommendedSemver(
+  diff: DiffResult
+): "major" | "minor" | "patch" {
+  if (diff.removed.length > 0 || diff.changed.length > 0) return "major";
+  if (diff.added.length > 0) return "minor";
+  return "patch";
+}
+
+/**
  * Group diff results by package
  */
 export interface PackageDiff {

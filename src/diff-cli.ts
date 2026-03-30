@@ -5,7 +5,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { computeDiffFromFiles, hasChanges, groupByPackage } from "./diff.js";
+import { computeDiffFromFiles, hasChanges, recommendedSemver } from "./diff.js";
 import { formatDiffMarkdown, formatDiffJson } from "./reporter.js";
 
 interface DiffCliOptions {
@@ -135,6 +135,7 @@ async function main(): Promise<number> {
   console.log(`  Added: ${diff.summary.totalAdded}`);
   console.log(`  Removed: ${diff.summary.totalRemoved}`);
   console.log(`  Changed: ${diff.summary.totalChanged}`);
+  console.log(`  Recommended semver: ${recommendedSemver(diff)}`);
 
   // Return 2 if there are changes (for CI use)
   return hasChanges(diff) ? 2 : 0;

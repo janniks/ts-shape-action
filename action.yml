@@ -43,6 +43,9 @@ outputs:
   exports-changed:
     description: "Number of exports changed"
     value: ${{ steps.diff.outputs.exports-changed }}
+  semver:
+    description: "Recommended semver bump (major, minor, or patch)"
+    value: ${{ steps.diff.outputs.semver }}
 
 runs:
   using: "composite"
@@ -129,6 +132,14 @@ runs:
           echo "exports-added=$ADDED" >> $GITHUB_OUTPUT
           echo "exports-removed=$REMOVED" >> $GITHUB_OUTPUT
           echo "exports-changed=$CHANGED" >> $GITHUB_OUTPUT
+
+          if [ "$REMOVED" -gt 0 ] || [ "$CHANGED" -gt 0 ]; then
+            echo "semver=major" >> $GITHUB_OUTPUT
+          elif [ "$ADDED" -gt 0 ]; then
+            echo "semver=minor" >> $GITHUB_OUTPUT
+          else
+            echo "semver=patch" >> $GITHUB_OUTPUT
+          fi
         fi
 
     - name: Post PR comment

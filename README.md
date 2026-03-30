@@ -111,6 +111,7 @@ The action posts a comment like this:
 | `exports-added`     | Number of exports added         |
 | `exports-removed`   | Number of exports removed       |
 | `exports-changed`   | Number of exports changed       |
+| `semver`            | Recommended semver bump (`major`, `minor`, or `patch`) |
 
 ## Advanced Usage
 
