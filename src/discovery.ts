@@ -115,6 +115,7 @@ export async function discoverWorkspacePackages(
     const matches = await glob(dirPattern, {
       cwd: rootDir,
       absolute: true,
+      ignore: ["**/node_modules/**"],
     });
     
     // Remove trailing slashes from matches
